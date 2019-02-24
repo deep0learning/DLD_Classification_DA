@@ -343,7 +343,7 @@ class CycleGAN_Model(object):
 
     def build_classification_model(self):
         self.cla_x = tf.placeholder(tf.float32, shape=[None, self.img_h, self.img_w, 1], name='cla_x')
-        self.tar_tst_x = tf.placeholder(tf.float32, shape=[None, self.img_h, self.img_w, 1], name='tar_tst_x')
+        self.direct_input_x = tf.placeholder(tf.float32, shape=[None, self.img_h, self.img_w, 1], name='direct_input_x')
         self.cla_y = tf.placeholder(tf.int32, shape=[None, self.num_class], name='cla_y')
         self.is_training = tf.placeholder(tf.bool, name='is_training')
 
@@ -360,7 +360,7 @@ class CycleGAN_Model(object):
                                                          out_channel3=64,
                                                          reuse=False)
 
-        self.pred_tar_tst, self.pred_softmax_tar_tst = self.resnet_model(inputMap=self.tar_tst_x,
+        self.pred_tar_tst, self.pred_softmax_tar_tst = self.resnet_model(inputMap=self.direct_input_x,
                                                                          model_name='classification_model',
                                                                          ksize=3,
                                                                          unit_num1=3,
@@ -522,6 +522,12 @@ class CycleGAN_Model(object):
 
             self.saver.save(self.sess, self.ckptDir + self.model + '-' + str(e))
 
-            eval.test_procedure(self.target_test_data, distribution_op=self.distribution_tar_tst, inputX=self.tar_tst_x,
-                                inputY=self.cla_y, mode='target', num_class=self.num_class, batch_size=self.bs,
-                                session=self.sess, is_training=self.is_training, ckptDir=self.ckptDir, model=self.model)
+            eval.test_procedure(self.source_test_data, distribution_op=self.distribution_tar_tst,
+                                inputX=self.direct_input_x, inputY=self.cla_y, mode='source', num_class=self.num_class,
+                                batch_size=self.bs, session=self.sess, is_training=self.is_training,
+                                ckptDir=self.ckptDir, model=self.model)
+
+            eval.test_procedure(self.target_test_data, distribution_op=self.distribution_tar_tst,
+                                inputX=self.direct_input_x, inputY=self.cla_y, mode='target', num_class=self.num_class,
+                                batch_size=self.bs, session=self.sess, is_training=self.is_training,
+                                ckptDir=self.ckptDir, model=self.model)

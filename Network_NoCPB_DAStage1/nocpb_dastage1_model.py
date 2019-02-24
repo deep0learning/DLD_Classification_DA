@@ -367,7 +367,7 @@ class nocpb_dastage1_model(object):
             for itr in range(self.itr_epoch):
                 for m in range(1):
                     feed_dict_train, feed_dict_eval = self.getBatchData()
-                    _, _ = self.sess.run(self.discriminator_feature_trainOp, feed_dict=feed_dict_train)
+                    _ = self.sess.run(self.discriminator_feature_trainOp, feed_dict=feed_dict_train)
                 feed_dict_train, feed_dict_eval = self.getBatchData()
                 _ = self.sess.run(self.encoder_trainOp, feed_dict=feed_dict_train)
 

@@ -24,9 +24,9 @@ os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 if args.data_domain == 'Source':
-    reload_path = '../checkpoint/baseline_s2t/baseline_s2t-???'
+    reload_path = '../checkpoint/baseline_s2t/baseline_s2t-199'
 elif args.data_domain == 'Target':
-    reload_path = '../checkpoint/baseline_t2s/baseline_t2s-???'
+    reload_path = '../checkpoint/baseline_t2s/baseline_t2s-137'
 else:
     reload_path = ''
 

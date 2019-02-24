@@ -69,7 +69,7 @@ def showResults(sorted_list, count):
 
 def main():
     top_k = 20
-    file_dir = 'D:/3/baseline_results/'
+    file_dir = 'D:/DLD_Classification_DomainAdaptation_Experimental_Results/Self-Comparison/'
     file_name_list = os.listdir(file_dir)
     print(file_name_list)
     for file in file_name_list:

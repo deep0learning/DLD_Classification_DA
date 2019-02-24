@@ -29,9 +29,9 @@ src_training, src_validation, src_test = src_data
 tar_training, tar_test = tar_data
 
 if args.data_domain == 'Source':
-    reload_path = '../checkpoint/baseline_s2t/baseline_s2t-???'
+    reload_path = '../checkpoint/baseline_s2t/baseline_s2t-199'
 elif args.data_domain == 'Target':
-    reload_path = '../checkpoint/baseline_t2s/baseline_t2s-???'
+    reload_path = '../checkpoint/baseline_t2s/baseline_t2s-137'
 else:
     reload_path = ''
 

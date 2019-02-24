@@ -4,9 +4,8 @@ import os
 def getInformation(file):
     epoch = []
     training_accuracy = []
-    validation_accuracy = []
-    training_loss = []
-    validation_loss = []
+    g_loss = []
+    d_loss = []
     source_test_accuracy = []
     source_test_fscore = []
     target_test_accuracy = []
@@ -22,17 +21,15 @@ def getInformation(file):
             if _line_information.startswith('epoch:'):
                 splitted_info = _line_information.split(',')
                 _eps = int(splitted_info[0][splitted_info[0].find('[') + 1:splitted_info[0].rfind(']')])
-                _training_accuracy = float(splitted_info[2][splitted_info[2].find('[') + 1:splitted_info[2].rfind(']')])
-                _validation_accuracy = float(
-                    splitted_info[3][splitted_info[3].find('[') + 1:splitted_info[3].rfind(']')])
-                _training_loss = float(splitted_info[4][splitted_info[4].find('[') + 1:splitted_info[4].rfind(']')])
-                _validation_loss = float(splitted_info[5][splitted_info[5].find('[') + 1:splitted_info[5].rfind(']')])
+                _training_accuracy = float(splitted_info[1][splitted_info[1].find('[') + 1:splitted_info[1].rfind(']')])
+                _g_loss = float(
+                    splitted_info[2][splitted_info[2].find('[') + 1:splitted_info[2].rfind(']')])
+                _d_loss = float(splitted_info[3][splitted_info[3].find('[') + 1:splitted_info[3].rfind(']')])
 
                 epoch.append(_eps)
                 training_accuracy.append(_training_accuracy)
-                validation_accuracy.append(_validation_accuracy)
-                training_loss.append(_training_loss)
-                validation_loss.append(_validation_loss)
+                g_loss.append(_g_loss)
+                d_loss.append(_d_loss)
 
             if _line_information.startswith('mode: source'):
                 _tst_accuracy_info = lines[l + 1].lower()
@@ -50,23 +47,22 @@ def getInformation(file):
                 target_test_accuracy.append(_target_tst_accuracy)
                 target_test_fscore.append(_target_tst_fscore)
 
-    for e, tr_acc, val_acc, tr_loss, val_loss, src_tst_acc, src_tst_fsc, tar_tst_acc, tar_tst_fsc in zip(epoch,
-                                                                                                         training_accuracy,
-                                                                                                         validation_accuracy,
-                                                                                                         training_loss,
-                                                                                                         validation_loss,
-                                                                                                         source_test_accuracy,
-                                                                                                         source_test_fscore,
-                                                                                                         target_test_accuracy,
-                                                                                                         target_test_fscore):
+    for e, tr_acc, g_l, d_l, src_tst_acc, src_tst_fsc, tar_tst_acc, tar_tst_fsc in zip(epoch,
+                                                                                       training_accuracy,
+                                                                                       g_loss,
+                                                                                       d_loss,
+                                                                                       source_test_accuracy,
+                                                                                       source_test_fscore,
+                                                                                       target_test_accuracy,
+                                                                                       target_test_fscore):
         summarized_list.append(
-            [e, tr_acc, val_acc, tr_loss, val_loss, src_tst_acc, src_tst_fsc, tar_tst_acc, tar_tst_fsc])
+            [e, tr_acc, g_l, d_l, src_tst_acc, src_tst_fsc, tar_tst_acc, tar_tst_fsc])
 
     return summarized_list
 
 
 def sortList(summarized_list):
-    sorted_list = sorted(summarized_list, key=lambda s: s[7], reverse=True)
+    sorted_list = sorted(summarized_list, key=lambda s: s[6], reverse=True)
 
     return sorted_list
 
@@ -82,13 +78,13 @@ def showResults(sorted_list, count):
         print(
             'Epoch [%d], Source Test Accuracy [%.4f], Source Test FScore [%.4f], Target Test Accuracy [%.4f], '
             'Target Test FScore [%.4f]' % (
-                sorted_list[i][0], sorted_list[i][5], sorted_list[i][6], sorted_list[i][7], sorted_list[i][8]))
+                sorted_list[i][0], sorted_list[i][4], sorted_list[i][5], sorted_list[i][6], sorted_list[i][7]))
     print()
 
 
 def main():
     top_k = 20
-    file_dir = 'D:/2/experimental_logs/ADDA_EXP/Step2/'
+    file_dir = 'D:/DLD_Classification_DomainAdaptation_Experimental_Results/ADDA/Step2/'
     file_name_list = os.listdir(file_dir)
     print(file_name_list)
     for file in file_name_list:

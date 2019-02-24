@@ -26,9 +26,9 @@ os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 if args.data_domain == 'Source':
-    reload_path = '../checkpoint/cyclegan_s2t_step1/cyclegan_s2t_step1-?'
+    reload_path = '../checkpoint/cyclegan_s2t_step1/cyclegan_s2t_step1-88'
 elif args.data_domain == 'Target':
-    reload_path = '../checkpoint/cyclegan_t2s_step1/cyclegan_t2s_step1-?'
+    reload_path = '../checkpoint/cyclegan_t2s_step1/cyclegan_t2s_step1-108'
 else:
     reload_path = ''
 
