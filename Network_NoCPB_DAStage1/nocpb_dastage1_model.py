@@ -1,11 +1,11 @@
 import sys
 
 sys.path.append('../Data_Initialization/')
-import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
 import Initialization as init
 import nocpb_dastage1_utils as utils
+import evaluation_function as eval
 import time
 
 
@@ -32,32 +32,27 @@ class nocpb_dastage1_model(object):
         self.plt_source_training_accuracy = []
         self.plt_g_loss = []
         self.plt_df_loss = []
-        self.plt_dl_loss = []
 
         self.build_model()
         self.saveConfiguration()
 
     def saveConfiguration(self):
-        utils.save2file('epoch : %d' % self.eps, self.ckptDir, self.model)
-        utils.save2file('model : %s' % self.model, self.ckptDir, self.model)
-        utils.save2file('learning rate : %g' % self.lr, self.ckptDir, self.model)
-        utils.save2file('batch size : %d' % self.bs, self.ckptDir, self.model)
-        utils.save2file('image height : %d' % self.img_h, self.ckptDir, self.model)
-        utils.save2file('image width : %d' % self.img_w, self.ckptDir, self.model)
-        utils.save2file('num class : %d' % self.num_class, self.ckptDir, self.model)
+        init.save2file('epoch : %d' % self.eps, self.ckptDir, self.model)
+        init.save2file('model : %s' % self.model, self.ckptDir, self.model)
+        init.save2file('learning rate : %g' % self.lr, self.ckptDir, self.model)
+        init.save2file('batch size : %d' % self.bs, self.ckptDir, self.model)
+        init.save2file('image height : %d' % self.img_h, self.ckptDir, self.model)
+        init.save2file('image width : %d' % self.img_w, self.ckptDir, self.model)
+        init.save2file('num class : %d' % self.num_class, self.ckptDir, self.model)
 
     def convLayer(self, inputMap, out_channel, ksize, stride, scope_name, padding='SAME'):
         with tf.variable_scope(scope_name):
-            conv_weight = tf.get_variable('conv_weight',
-                                          [ksize, ksize, inputMap.get_shape()[-1], out_channel],
-                                          initializer=layers.variance_scaling_initializer())
-
-            conv_result = tf.nn.conv2d(inputMap, conv_weight, strides=[1, stride, stride, 1], padding=padding)
-
-            tf.summary.histogram('conv_weight', conv_weight)
+            conv_result = tf.layers.conv2d(inputs=inputMap, filters=out_channel, kernel_size=(ksize, ksize),
+                                           strides=(stride, stride), padding=padding, use_bias=False,
+                                           kernel_initializer=layers.variance_scaling_initializer(), name='conv')
             tf.summary.histogram('conv_result', conv_result)
 
-        return conv_result
+            return conv_result
 
     def bnLayer(self, inputMap, scope_name, is_training):
         with tf.variable_scope(scope_name):
@@ -86,18 +81,12 @@ class nocpb_dastage1_model(object):
 
     def fcLayer(self, inputMap, out_channel, scope_name):
         with tf.variable_scope(scope_name):
-            in_channel = inputMap.get_shape()[-1]
-            fc_weight = tf.get_variable('fc_weight', [in_channel, out_channel],
-                                        initializer=layers.variance_scaling_initializer())
-            fc_bias = tf.get_variable('fc_bias', [out_channel], initializer=tf.zeros_initializer())
+            fc_result = tf.layers.dense(inputs=inputMap, units=out_channel,
+                                        kernel_initializer=layers.variance_scaling_initializer(), name='dense')
 
-            fc_result = tf.matmul(inputMap, fc_weight) + fc_bias
-
-            tf.summary.histogram('fc_weight', fc_weight)
-            tf.summary.histogram('fc_bias', fc_bias)
             tf.summary.histogram('fc_result', fc_result)
 
-        return fc_result
+            return fc_result
 
     def residualUnitLayer(self, inputMap, out_channel, ksize, unit_name, down_sampling, is_training, first_conv=False):
         with tf.variable_scope(unit_name):
@@ -163,7 +152,7 @@ class nocpb_dastage1_model(object):
 
         return pred, pred_softmax
 
-    def discriminator_F(self, inputMap, scope_name, is_training, reuse):
+    def discriminator(self, inputMap, scope_name, is_training, reuse):
         with tf.variable_scope(scope_name, reuse=reuse):
             lrelu1_1 = self.lreluLayer(inputMap, scope_name='lrelu1_1')
             conv1_1 = self.convLayer(lrelu1_1, out_channel=64, ksize=3, stride=1, scope_name='conv1_1')
@@ -190,21 +179,6 @@ class nocpb_dastage1_model(object):
             conv_final = self.convLayer(lrelu4_1, out_channel=1, ksize=3, stride=1, scope_name='conv_final')
 
         return conv_final
-
-    def discriminator_L(self, inputMap, scope_name, reuse):
-        with tf.variable_scope(scope_name, reuse=reuse):
-            argmax_index = tf.argmax(inputMap, axis=1)
-            one_hot = tf.one_hot(argmax_index, depth=self.num_class)
-
-            fc1 = self.fcLayer(inputMap=one_hot, out_channel=128, scope_name='fc1')
-            lrelu1 = self.lreluLayer(fc1, scope_name='lrelu1')
-            fc2 = self.fcLayer(inputMap=lrelu1, out_channel=256, scope_name='fc2')
-            lrelu2 = self.lreluLayer(fc2, scope_name='lrelu2')
-            fc3 = self.fcLayer(inputMap=lrelu2, out_channel=512, scope_name='fc3')
-            lrelu3 = self.lreluLayer(fc3, scope_name='lrelu3')
-            fc4 = self.fcLayer(inputMap=lrelu3, out_channel=1, scope_name='fc4')
-
-        return fc4
 
     def task_model(self, inputMap, ksize, stage1_num, stage2_num, stage3_num, out_channel1, out_channel2, out_channel3,
                    is_training, reuse_stage0=False, reuse_stage1=False, reuse_stage2=False, reuse_stage3=False,
@@ -277,47 +251,29 @@ class nocpb_dastage1_model(object):
         self.source_stage1_features = self.feature_lib_source[1]
         self.target_stage1_features = self.feature_lib_target[1]
 
-        self.source_stage1_dis = self.discriminator_F(self.source_stage1_features, scope_name='stage1_discriminator',
-                                                      is_training=self.is_training, reuse=False)
-        self.target_stage1_dis = self.discriminator_F(self.target_stage1_features, scope_name='stage1_discriminator',
-                                                      is_training=self.is_training, reuse=True)
-
-        self.source_label_dis = self.discriminator_L(self.y_source, scope_name='label_discriminator', reuse=False)
-
-        self.target_label_dis = self.discriminator_L(self.pred_target, scope_name='label_discriminator', reuse=True)
+        self.source_stage1_dis = self.discriminator(self.source_stage1_features, scope_name='stage1_discriminator',
+                                                    is_training=self.is_training, reuse=False)
+        self.target_stage1_dis = self.discriminator(self.target_stage1_features, scope_name='stage1_discriminator',
+                                                    is_training=self.is_training, reuse=True)
 
         with tf.variable_scope('loss'):
             self.target_stage1_gloss = tf.reduce_mean(
                 tf.squared_difference(self.target_stage1_dis, tf.ones_like(self.target_stage1_dis)))
-
-            self.target_label_gloss = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(logits=self.target_label_dis,
-                                                        labels=tf.ones_like(self.target_label_dis)))
 
             self.source_stage1_dloss = tf.reduce_mean(
                 tf.squared_difference(self.source_stage1_dis, tf.ones_like(self.source_stage1_dis)))
             self.target_stage1_dloss = tf.reduce_mean(
                 tf.squared_difference(self.target_stage1_dis, tf.zeros_like(self.target_stage1_dis)))
 
-            self.source_label_dloss = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(logits=self.source_label_dis,
-                                                        labels=tf.ones_like(self.source_label_dis)))
-            self.target_label_dloss = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(logits=self.target_label_dis,
-                                                        labels=tf.zeros_like(self.target_label_dis)))
-
             self.d_loss_feature = self.source_stage1_dloss + self.target_stage1_dloss
-            self.d_loss_label = self.source_label_dloss + self.target_label_dloss
 
-            self.g_loss = self.target_stage1_gloss + self.target_label_gloss
+            self.g_loss = self.target_stage1_gloss
 
         with tf.variable_scope('variables'):
             # 定义参与训练的参数
             self.stage1_target_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='stage1_target')
             self.stage1_discriminator_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                                               scope='stage1_discriminator')
-            self.label_discriminator_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
-                                                             scope='label_discriminator')
 
             # 定义需要重载的参数
             self.reload_var_shared = []
@@ -346,10 +302,6 @@ class nocpb_dastage1_model(object):
                 self.discriminator_feature_trainOp = tf.train.AdamOptimizer(self.lr, beta1=0.5).minimize(
                     self.d_loss_feature,
                     var_list=self.stage1_discriminator_var)
-            with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope='label_discriminator')):
-                self.discriminator_label_trainOp = tf.train.AdamOptimizer(self.lr, beta1=0.5).minimize(
-                    self.d_loss_label,
-                    var_list=self.label_discriminator_var)
 
         with tf.variable_scope('tfSummary'):
             self.merged = tf.summary.merge_all()
@@ -373,54 +325,6 @@ class nocpb_dastage1_model(object):
             self.accuracy_source = tf.reduce_mean(tf.cast(self.correct_prediction_source, 'float'))
             self.accuracy_target = tf.reduce_mean(tf.cast(self.correct_prediction_target, 'float'))
 
-
-    def f_value(self, matrix):
-        f = 0.0
-        length = len(matrix[0])
-        for i in range(length):
-            recall = matrix[i][i] / np.sum([matrix[i][m] for m in range(self.num_class)])
-            precision = matrix[i][i] / np.sum([matrix[n][i] for n in range(self.num_class)])
-            result = (recall * precision) / (recall + precision)
-            f += result
-        f *= (2 / self.num_class)
-
-        return f
-
-
-    def test_procedure(self, test_data, distribution_op, inputX, inputY, mode):
-        confusion_matrics = np.zeros([self.num_class, self.num_class], dtype="int")
-
-        tst_batch_num = int(np.ceil(test_data[0].shape[0] / self.bs))
-        for step in range(tst_batch_num):
-            _testImg = test_data[0][step * self.bs:step * self.bs + self.bs]
-            _testLab = test_data[1][step * self.bs:step * self.bs + self.bs]
-
-            matrix_row, matrix_col = self.sess.run(distribution_op, feed_dict={inputX: _testImg,
-                                                                               inputY: _testLab,
-                                                                               self.is_training: False})
-            for m, n in zip(matrix_row, matrix_col):
-                confusion_matrics[m][n] += 1
-
-        test_accuracy = float(np.sum([confusion_matrics[q][q] for q in range(self.num_class)])) / float(
-            np.sum(confusion_matrics))
-        detail_test_accuracy = [confusion_matrics[i][i] / np.sum(confusion_matrics[i]) for i in
-                                range(self.num_class)]
-        log0 = "Mode: " + mode
-        log1 = "Test Accuracy : %g" % test_accuracy
-        log2 = np.array(confusion_matrics.tolist())
-        log3 = ''
-        for j in range(self.num_class):
-            log3 += 'category %s test accuracy : %g\n' % (utils.pulmonary_category[j], detail_test_accuracy[j])
-        log3 = log3[:-1]
-        log4 = 'F_Value : %g\n' % self.f_value(confusion_matrics)
-
-        utils.save2file(log0, self.ckptDir, self.model)
-        utils.save2file(log1, self.ckptDir, self.model)
-        utils.save2file(log2, self.ckptDir, self.model)
-        utils.save2file(log3, self.ckptDir, self.model)
-        utils.save2file(log4, self.ckptDir, self.model)
-
-
     def getBatchData(self):
         _src_tr_img_batch, _src_tr_lab_batch = init.next_batch(self.source_training_data[0],
                                                                self.source_training_data[1], self.bs)
@@ -436,7 +340,6 @@ class nocpb_dastage1_model(object):
                           self.is_training: False}
 
         return feed_dict, feed_dict_eval
-
 
     def train(self):
         # 全局初始化
@@ -459,43 +362,35 @@ class nocpb_dastage1_model(object):
         source_training_acc = 0.0
         g_loss = 0.0
         d_loss_feature = 0.0
-        d_loss_label = 0.0
 
         for e in range(1, self.eps + 1):
             for itr in range(self.itr_epoch):
-                for m in range(2):
+                for m in range(1):
                     feed_dict_train, feed_dict_eval = self.getBatchData()
-                    _, _ = self.sess.run(
-                        [self.discriminator_feature_trainOp, self.discriminator_label_trainOp],
-                        feed_dict=feed_dict_train)
+                    _, _ = self.sess.run(self.discriminator_feature_trainOp, feed_dict=feed_dict_train)
                 feed_dict_train, feed_dict_eval = self.getBatchData()
                 _ = self.sess.run(self.encoder_trainOp, feed_dict=feed_dict_train)
 
-                _source_training_acc, _g_loss, _d_loss_feature, _d_loss_label = self.sess.run(
-                    [self.accuracy_source, self.g_loss, self.d_loss_feature, self.d_loss_label],
-                    feed_dict=feed_dict_train)
+                _source_training_acc, _g_loss, _d_loss_feature = self.sess.run(
+                    [self.accuracy_source, self.g_loss, self.d_loss_feature], feed_dict=feed_dict_train)
 
                 source_training_acc += _source_training_acc
                 g_loss += _g_loss
                 d_loss_feature += _d_loss_feature
-                d_loss_label += _d_loss_label
 
             summary = self.sess.run(self.merged, feed_dict=feed_dict_eval)
 
             source_training_acc = float(source_training_acc / self.itr_epoch)
             g_loss = float(g_loss / self.itr_epoch)
             d_loss_feature = float(d_loss_feature / self.itr_epoch)
-            d_loss_label = float(d_loss_label / self.itr_epoch)
 
-            log1 = "Epoch: [%d], Source Training Accuracy: [%g], G Loss: [%g], DF Loss: [%g], DL Loss: [%g], " \
-                   "Time: [%s]" % (
-                       e, source_training_acc, g_loss, d_loss_feature, d_loss_label, time.ctime(time.time()))
+            log1 = "Epoch: [%d], Source Training Accuracy: [%g], G Loss: [%g], DF Loss: [%g], Time: [%s]" % (
+                e, source_training_acc, g_loss, d_loss_feature, time.ctime(time.time()))
 
             self.plt_epoch.append(e)
             self.plt_source_training_accuracy.append(source_training_acc)
             self.plt_g_loss.append(g_loss)
             self.plt_df_loss.append(d_loss_feature)
-            self.plt_dl_loss.append(d_loss_label)
 
             utils.plotAccuracy(x=self.plt_epoch,
                                y=self.plt_source_training_accuracy,
@@ -506,26 +401,25 @@ class nocpb_dastage1_model(object):
             utils.plotLoss(x=self.plt_epoch,
                            y1=self.plt_g_loss,
                            y2=self.plt_df_loss,
-                           y3=self.plt_dl_loss,
                            figName=self.model,
                            line1Name='g loss',
                            line2Name='df loss',
-                           line3Name='dl loss',
                            savePath=self.ckptDir)
 
-            utils.save2file(log1, self.ckptDir, self.model)
+            init.save2file(log1, self.ckptDir, self.model)
 
             self.writer.add_summary(summary, e)
 
             self.saver.save(self.sess, self.ckptDir + self.model + '-' + str(e))
 
-            self.test_procedure(self.source_test_data, distribution_op=self.distribution_source, inputX=self.x_source,
-                                inputY=self.y_source, mode='source')
+            eval.test_procedure(self.source_test_data, distribution_op=self.distribution_source, inputX=self.x_source,
+                                inputY=self.y_source, mode='source', num_class=self.num_class, batch_size=self.bs,
+                                session=self.sess, is_training=self.is_training, ckptDir=self.ckptDir, model=self.model)
 
-            self.test_procedure(self.target_test_data, distribution_op=self.distribution_target, inputX=self.x_target,
-                                inputY=self.y_target, mode='target')
+            eval.test_procedure(self.target_test_data, distribution_op=self.distribution_target, inputX=self.x_target,
+                                inputY=self.y_target, mode='target', num_class=self.num_class, batch_size=self.bs,
+                                session=self.sess, is_training=self.is_training, ckptDir=self.ckptDir, model=self.model)
 
             source_training_acc = 0.0
             g_loss = 0.0
             d_loss_feature = 0.0
-            d_loss_label = 0.0

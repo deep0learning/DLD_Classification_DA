@@ -4,22 +4,21 @@ sys.path.append('../Data_Initialization/')
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
 import Initialization as init
-import baseline_utils as utils
+import ADDA_utils as utils
 import evaluation_function as eval
 import time
 
 
-class baseline_model(object):
-    def __init__(self, model_name, sess, train_data, val_data, tst_data, reload_path, epoch, num_class, learning_rate,
-                 batch_size, img_height, img_width, train_phase):
+class DA_Model_step1(object):
+    def __init__(self, model_name, sess, train_data, val_data, tst_data, epoch, num_class, learning_rate, batch_size,
+                 img_height, img_width, train_phase, step):
 
         self.sess = sess
         self.source_training_data = train_data[0]
         self.target_training_data = train_data[1]
-        self.validation_data = val_data
+        self.source_validation_data = val_data
         self.source_test_data = tst_data[0]
         self.target_test_data = tst_data[1]
-        self.reload_path = reload_path
         self.eps = epoch
         self.model = model_name
         self.ckptDir = '../checkpoint/' + self.model + '/'
@@ -29,6 +28,7 @@ class baseline_model(object):
         self.img_w = img_width
         self.num_class = num_class
         self.train_phase = train_phase
+        self.step = step
         self.plt_epoch = []
         self.plt_training_accuracy = []
         self.plt_validation_accuracy = []
@@ -48,6 +48,7 @@ class baseline_model(object):
         init.save2file('image width : %d' % self.img_w, self.ckptDir, self.model)
         init.save2file('num class : %d' % self.num_class, self.ckptDir, self.model)
         init.save2file('train phase : %s' % self.train_phase, self.ckptDir, self.model)
+        init.save2file('step : %d' % self.step, self.ckptDir, self.model)
 
     def convLayer(self, inputMap, out_channel, ksize, stride, scope_name, padding='SAME'):
         with tf.variable_scope(scope_name):
@@ -119,11 +120,11 @@ class baseline_model(object):
 
             added = tf.add(conv_layer2, identical_mapping)
 
-        return added
+            return added
 
-    def residualStageLayer(self, inputMap, ksize, out_channel, unit_num, stage_name, down_sampling, first_conv,
-                           is_training, reuse=False):
-        with tf.variable_scope(stage_name, reuse=reuse):
+    def residualSectionLayer(self, inputMap, ksize, out_channel, unit_num, section_name, down_sampling, first_conv,
+                             is_training):
+        with tf.variable_scope(section_name):
             _out = inputMap
             _out = self.residualUnitLayer(_out, out_channel, ksize, unit_name='unit_1', down_sampling=down_sampling,
                                           first_conv=first_conv, is_training=is_training)
@@ -131,82 +132,89 @@ class baseline_model(object):
                 _out = self.residualUnitLayer(_out, out_channel, ksize, unit_name='unit_' + str(n),
                                               down_sampling=False, first_conv=False, is_training=is_training)
 
-        return _out
+            return _out
 
-    def stage0_Block(self, inputMap, scope_name, out_channel, ksize, reuse=False):
-        with tf.variable_scope(scope_name, reuse=reuse):
-            stage0_conv = self.convLayer(inputMap, out_channel, ksize=ksize, stride=1, scope_name='stage0_conv')
-            stage0_bn = self.bnLayer(stage0_conv, scope_name='stage0_bn', is_training=self.is_training)
-            stage0_relu = self.reluLayer(stage0_bn, scope_name='stage0_relu')
+    def resnet_model(self, inputMap, model_name, ksize, unit_num1, unit_num2, unit_num3, out_channel1, out_channel2,
+                     out_channel3, reuse):
+        with tf.variable_scope(model_name, reuse=reuse):
+            _conv = self.convLayer(inputMap, out_channel1, ksize=ksize, stride=1, scope_name='unit1_conv')
+            _bn = self.bnLayer(_conv, scope_name='unit1_bn', is_training=self.is_training)
+            _relu = self.reluLayer(_bn, scope_name='unit1_relu')
 
-        return stage0_relu
+            sec1_out = self.residualSectionLayer(inputMap=_relu,
+                                                 ksize=ksize,
+                                                 out_channel=out_channel1,
+                                                 unit_num=unit_num1,
+                                                 section_name='section1',
+                                                 down_sampling=False,
+                                                 first_conv=True,
+                                                 is_training=self.is_training)
 
-    def classifier(self, inputMap, scope_name, is_training, reuse=False):
-        with tf.variable_scope(scope_name, reuse=reuse):
-            bn = self.bnLayer(inputMap, scope_name='bn', is_training=is_training)
-            relu = self.reluLayer(bn, scope_name='relu')
-            gap = self.globalPoolLayer(relu, scope_name='gap')
-            flatten = self.flattenLayer(gap, scope_name='flatten')
-            pred = self.fcLayer(flatten, self.num_class, scope_name='pred')
-            pred_softmax = tf.nn.softmax(pred, name='pred_softmax')
+            sec2_out = self.residualSectionLayer(inputMap=sec1_out,
+                                                 ksize=ksize,
+                                                 out_channel=out_channel2,
+                                                 unit_num=unit_num2,
+                                                 section_name='section2',
+                                                 down_sampling=True,
+                                                 first_conv=False,
+                                                 is_training=self.is_training)
 
-        return pred, pred_softmax
+            sec3_out = self.residualSectionLayer(inputMap=sec2_out,
+                                                 ksize=ksize,
+                                                 out_channel=out_channel3,
+                                                 unit_num=unit_num3,
+                                                 section_name='section3',
+                                                 down_sampling=True,
+                                                 first_conv=False,
+                                                 is_training=self.is_training)
 
-    def task_model(self, inputMap, ksize, stage1_num, stage2_num, stage3_num, out_channel1, out_channel2, out_channel3,
-                   is_training, reuse_stage0=False, reuse_stage1=False, reuse_stage2=False, reuse_stage3=False,
-                   reuse_classifier=False, extra_stage1_name='', extra_stage2_name='', extra_stage3_name=''):
-        stage0 = self.stage0_Block(inputMap=inputMap, scope_name='stage0', out_channel=out_channel1, ksize=ksize,
-                                   reuse=reuse_stage0)
+            return sec3_out
 
-        stage1 = self.residualStageLayer(inputMap=stage0, ksize=ksize, out_channel=out_channel1,
-                                         unit_num=stage1_num, stage_name='stage1' + extra_stage1_name,
-                                         down_sampling=False, first_conv=True, is_training=is_training,
-                                         reuse=reuse_stage1)
+    def classifier(self, inputMap, scope_name):
+        with tf.variable_scope(scope_name):
+            _fm_bn = self.bnLayer(inputMap, scope_name='_fm_bn', is_training=self.is_training)
+            _fm_relu = self.reluLayer(_fm_bn, scope_name='_fm_relu')
+            _fm_pool = self.globalPoolLayer(_fm_relu, scope_name='_fm_gap')
+            _fm_flatten = self.flattenLayer(_fm_pool, scope_name='_fm_flatten')
 
-        stage2 = self.residualStageLayer(inputMap=stage1, ksize=ksize, out_channel=out_channel2,
-                                         unit_num=stage2_num, stage_name='stage2' + extra_stage2_name,
-                                         down_sampling=True, first_conv=False, is_training=is_training,
-                                         reuse=reuse_stage2)
+            y_pred = self.fcLayer(_fm_flatten, self.num_class, scope_name='fc_pred')
+            y_pred_softmax = tf.nn.softmax(y_pred)
 
-        stage3 = self.residualStageLayer(inputMap=stage2, ksize=ksize, out_channel=out_channel3,
-                                         unit_num=stage3_num, stage_name='stage3' + extra_stage3_name,
-                                         down_sampling=True, first_conv=False, is_training=is_training,
-                                         reuse=reuse_stage3)
-
-        pred, pred_softmax = self.classifier(stage3, scope_name='classifier', is_training=is_training,
-                                             reuse=reuse_classifier)
-
-        return pred, pred_softmax
+            return y_pred, y_pred_softmax
 
     def build_model(self):
-        self.x = tf.placeholder(tf.float32, shape=[None, self.img_h, self.img_w, 1], name='x')
-        tf.summary.image('Image/origin', self.x)
-        self.y = tf.placeholder(tf.int32, shape=[None, self.num_class], name='y')
+        self.x_source = tf.placeholder(tf.float32, shape=[None, self.img_h, self.img_w, 1], name='x_source')
+        tf.summary.image('source_input', self.x_source)
+        self.y_source = tf.placeholder(tf.int32, shape=[None, self.num_class], name='y_source')
         self.is_training = tf.placeholder(tf.bool, name='is_training')
 
-        self.pred, self.pred_softmax = self.task_model(inputMap=self.x, ksize=3, stage1_num=3, stage2_num=3,
-                                                       stage3_num=3, out_channel1=16, out_channel2=32, out_channel3=64,
-                                                       is_training=self.is_training,
-                                                       reuse_stage0=False,
-                                                       reuse_stage1=False,
-                                                       reuse_stage2=False,
-                                                       reuse_stage3=False,
-                                                       reuse_classifier=False)
+        self.source_featureMaps = self.resnet_model(
+            inputMap=self.x_source,
+            model_name='source_encoder',
+            ksize=3,
+            unit_num1=3,
+            unit_num2=3,
+            unit_num3=3,
+            out_channel1=16,
+            out_channel2=32,
+            out_channel3=64,
+            reuse=False)
+
+        self.y_pred, self.y_pred_softmax = self.classifier(self.source_featureMaps, scope_name='classifier')
 
         with tf.variable_scope('loss'):
             # supervised loss
-            self.supervised_loss = tf.reduce_mean(
-                tf.nn.softmax_cross_entropy_with_logits(logits=self.pred, labels=self.y))
-            tf.summary.scalar('supervised_loss', self.supervised_loss)
+            self.loss = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits(logits=self.y_pred, labels=self.y_source))
+            tf.summary.scalar('supervised_loss', self.loss)
 
-        with tf.variable_scope('variables'):
+        with tf.variable_scope('optimization_variables'):
             self.t_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
 
         with tf.variable_scope('optimize'):
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
             with tf.control_dependencies(update_ops):
-                self.task_trainOp = tf.train.AdamOptimizer(self.lr).minimize(self.supervised_loss,
-                                                                             var_list=self.t_var)
+                self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.loss, var_list=self.t_var)
 
         with tf.variable_scope('tfSummary'):
             self.merged = tf.summary.merge_all()
@@ -222,19 +230,19 @@ class baseline_model(object):
             self.saver = tf.train.Saver(var_list=var_list, max_to_keep=self.eps)
 
         with tf.variable_scope('accuracy'):
-            self.distribution = [tf.argmax(self.y, 1), tf.argmax(self.pred_softmax, 1)]
-            self.correct_prediction = tf.equal(self.distribution[0], self.distribution[1])
-            self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, 'float'))
+            self.distribution_source = [tf.argmax(self.y_source, 1), tf.argmax(self.y_pred_softmax, 1)]
+            self.correct_prediction_source = tf.equal(self.distribution_source[0], self.distribution_source[1])
+            self.accuracy_source = tf.reduce_mean(tf.cast(self.correct_prediction_source, 'float'))
 
     def getBatchData(self):
         _src_tr_img_batch, _src_tr_lab_batch = init.next_batch(self.source_training_data[0],
                                                                self.source_training_data[1], self.bs)
 
-        feed_dict = {self.x: _src_tr_img_batch,
-                     self.y: _src_tr_lab_batch,
+        feed_dict = {self.x_source: _src_tr_img_batch,
+                     self.y_source: _src_tr_lab_batch,
                      self.is_training: True}
-        feed_dict_eval = {self.x: _src_tr_img_batch,
-                          self.y: _src_tr_lab_batch,
+        feed_dict_eval = {self.x_source: _src_tr_img_batch,
+                          self.y_source: _src_tr_lab_batch,
                           self.is_training: False}
 
         return feed_dict, feed_dict_eval
@@ -243,39 +251,40 @@ class baseline_model(object):
         self.sess.run(tf.global_variables_initializer())
         self.itr_epoch = len(self.source_training_data[0]) // self.bs
 
-        training_acc = 0.0
-        training_loss = 0.0
+        source_training_acc = 0.0
+        source_training_loss = 0.0
 
         for e in range(1, self.eps + 1):
             for itr in range(self.itr_epoch):
                 feed_dict_train, feed_dict_eval = self.getBatchData()
-                _ = self.sess.run(self.task_trainOp, feed_dict=feed_dict_train)
+                _ = self.sess.run(self.train_op, feed_dict=feed_dict_train)
 
-                _training_accuracy, _training_loss = self.sess.run([self.accuracy, self.supervised_loss],
+                _training_accuracy, _training_loss = self.sess.run([self.accuracy_source, self.loss],
                                                                    feed_dict=feed_dict_eval)
 
-                training_acc += _training_accuracy
-                training_loss += _training_loss
+                source_training_acc += _training_accuracy
+                source_training_loss += _training_loss
 
             summary = self.sess.run(self.merged, feed_dict=feed_dict_eval)
 
-            training_acc = float(training_acc / self.itr_epoch)
-            training_loss = float(training_loss / self.itr_epoch)
+            source_training_acc = float(source_training_acc / self.itr_epoch)
+            source_training_loss = float(source_training_loss / self.itr_epoch)
 
-            validation_acc, validation_loss = eval.validation_procedure(
-                validation_data=self.validation_data, distribution_op=self.distribution,
-                loss_op=self.supervised_loss, inputX=self.x, inputY=self.y, num_class=self.num_class,
+            source_validation_acc, source_validation_loss = eval.validation_procedure(
+                validation_data=self.source_validation_data, distribution_op=self.distribution_source,
+                loss_op=self.loss, inputX=self.x_source, inputY=self.y_source, num_class=self.num_class,
                 batch_size=self.bs, is_training=self.is_training, session=self.sess)
 
             log1 = "Epoch: [%d], Training Accuracy: [%g], Validation Accuracy: [%g], Training Loss: [%g], " \
                    "Validation Loss: [%g], Time: [%s]" % (
-                       e, training_acc, validation_acc, training_loss, validation_loss, time.ctime(time.time()))
+                e, source_training_acc, source_validation_acc, source_training_loss, source_validation_loss,
+                time.ctime(time.time()))
 
             self.plt_epoch.append(e)
-            self.plt_training_accuracy.append(training_acc)
-            self.plt_training_loss.append(training_loss)
-            self.plt_validation_accuracy.append(validation_acc)
-            self.plt_validation_loss.append(validation_loss)
+            self.plt_training_accuracy.append(source_training_acc)
+            self.plt_training_loss.append(source_training_loss)
+            self.plt_validation_accuracy.append(source_validation_acc)
+            self.plt_validation_loss.append(source_validation_loss)
 
             utils.plotAccuracy(x=self.plt_epoch,
                                y1=self.plt_training_accuracy,
@@ -299,20 +308,17 @@ class baseline_model(object):
 
             self.saver.save(self.sess, self.ckptDir + self.model + '-' + str(e))
 
-            eval.test_procedure(self.source_test_data, distribution_op=self.distribution, inputX=self.x, inputY=self.y,
-                                mode='source', num_class=self.num_class, batch_size=self.bs, session=self.sess,
-                                is_training=self.is_training, ckptDir=self.ckptDir, model=self.model)
+            eval.test_procedure(self.source_test_data, distribution_op=self.distribution_source,
+                                inputX=self.x_source, inputY=self.y_source, mode='source', batch_size=self.bs,
+                                session=self.sess, is_training=self.is_training, ckptDir=self.ckptDir, model=self.model,
+                                num_class=self.num_class)
 
-            training_acc = 0.0
-            training_loss = 0.0
+            source_training_acc = 0.0
+            source_training_loss = 0.0
 
-    def test(self):
-        try:
-            self.saver.restore(self.sess, self.reload_path)
-            print('Reload parameters finish')
-        except:
-            print('Reload failed')
-
-        eval.test_procedure(self.target_test_data, distribution_op=self.distribution, inputX=self.x, inputY=self.y,
-                            mode='target', num_class=self.num_class, batch_size=self.bs, session=self.sess,
-                            is_training=self.is_training, ckptDir=self.ckptDir, model=self.model)
+    def test(self, reload_path):
+        self.saver.restore(self.sess, reload_path)
+        eval.test_procedure(self.target_test_data, distribution_op=self.distribution_source,
+                            inputX=self.x_source, inputY=self.y_source, mode='source', batch_size=self.bs,
+                            session=self.sess, is_training=self.is_training, ckptDir=self.ckptDir, model=self.model,
+                            num_class=self.num_class)
