@@ -7,6 +7,7 @@ import Initialization as init
 import time
 import evaluation_function as eval
 import cyclegan_utils as utils
+import numpy as np
 
 
 class CycleGAN_Model(object):
@@ -349,6 +350,9 @@ class CycleGAN_Model(object):
 
         self.fake_x = self.Uet_G(inputMap=self.cla_x, scope_name='G', is_training=self.is_training,
                                  reuse=False)
+        tf.summary.image('Image/origin_x', self.cla_x)
+        tf.summary.image('Image/fake_x', self.fake_x)
+        
         self.pred, self.pred_softmax = self.resnet_model(inputMap=self.fake_x,
                                                          model_name='classification_model',
                                                          ksize=3,
@@ -428,10 +432,12 @@ class CycleGAN_Model(object):
                                                                self.source_training_data[1], self.bs)
 
         feed_dict = {self.cla_x: _src_tr_img_batch,
+                     self.direct_input_x: _src_tr_img_batch,
                      self.cla_y: _src_tr_lab_batch,
                      self.is_training: True}
 
         feed_dict_eval = {self.cla_x: _src_tr_img_batch,
+                          self.direct_input_x: _src_tr_img_batch,
                           self.cla_y: _src_tr_lab_batch,
                           self.is_training: False}
 
@@ -460,6 +466,41 @@ class CycleGAN_Model(object):
             self.writer.add_summary(summary, e)
 
             self.saver.save(self.sess, self.ckptDir + self.model + '-' + str(e))
+
+    def test_procedure(self, test_data, distribution_op, inputX, inputX_, inputY, mode, num_class, batch_size, session,
+                       is_training, ckptDir, model):
+        confusion_matrics = np.zeros([num_class, num_class], dtype="int")
+
+        tst_batch_num = int(np.ceil(test_data[0].shape[0] / batch_size))
+        for step in range(tst_batch_num):
+            _testImg = test_data[0][step * batch_size:step * batch_size + batch_size]
+            _testLab = test_data[1][step * batch_size:step * batch_size + batch_size]
+
+            matrix_row, matrix_col = session.run(distribution_op, feed_dict={inputX: _testImg,
+                                                                             inputX_: _testImg,
+                                                                             inputY: _testLab,
+                                                                             is_training: False})
+            for m, n in zip(matrix_row, matrix_col):
+                confusion_matrics[m][n] += 1
+
+        test_accuracy = float(np.sum([confusion_matrics[q][q] for q in range(num_class)])) / float(
+            np.sum(confusion_matrics))
+        detail_test_accuracy = [confusion_matrics[i][i] / np.sum(confusion_matrics[i]) for i in
+                                range(num_class)]
+        log0 = "Mode: " + mode
+        log1 = "Test Accuracy : %g" % test_accuracy
+        log2 = np.array(confusion_matrics.tolist())
+        log3 = ''
+        for j in range(num_class):
+            log3 += 'category %s test accuracy : %g\n' % (init.pulmonary_category[j], detail_test_accuracy[j])
+        log3 = log3[:-1]
+        log4 = 'F_Value : %g\n' % eval.f_value(confusion_matrics, num_class)
+
+        init.save2file(log0, ckptDir, model)
+        init.save2file(log1, ckptDir, model)
+        init.save2file(log2, ckptDir, model)
+        init.save2file(log3, ckptDir, model)
+        init.save2file(log4, ckptDir, model)
 
     def train_step2(self, reload_path):
         self.plt_epoch = []
@@ -522,12 +563,12 @@ class CycleGAN_Model(object):
 
             self.saver.save(self.sess, self.ckptDir + self.model + '-' + str(e))
 
-            eval.test_procedure(self.source_test_data, distribution_op=self.distribution_tar_tst,
-                                inputX=self.direct_input_x, inputY=self.cla_y, mode='source', num_class=self.num_class,
-                                batch_size=self.bs, session=self.sess, is_training=self.is_training,
-                                ckptDir=self.ckptDir, model=self.model)
+            self.test_procedure(self.source_test_data, distribution_op=self.distribution_tar_tst,
+                                inputX=self.direct_input_x, inputX_=self.cla_x, inputY=self.cla_y, mode='source',
+                                num_class=self.num_class, batch_size=self.bs, session=self.sess,
+                                is_training=self.is_training, ckptDir=self.ckptDir, model=self.model)
 
-            eval.test_procedure(self.target_test_data, distribution_op=self.distribution_tar_tst,
-                                inputX=self.direct_input_x, inputY=self.cla_y, mode='target', num_class=self.num_class,
-                                batch_size=self.bs, session=self.sess, is_training=self.is_training,
-                                ckptDir=self.ckptDir, model=self.model)
+            self.test_procedure(self.target_test_data, distribution_op=self.distribution_tar_tst,
+                                inputX=self.direct_input_x, inputX_=self.cla_x, inputY=self.cla_y, mode='target',
+                                num_class=self.num_class, batch_size=self.bs, session=self.sess,
+                                is_training=self.is_training, ckptDir=self.ckptDir, model=self.model)
