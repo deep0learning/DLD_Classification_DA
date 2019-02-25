@@ -12,7 +12,7 @@ import numpy as np
 
 class CycleGAN_Model(object):
     def __init__(self, model_name, sess, train_data, val_data, tst_data, epoch, num_class, learning_rate, batch_size,
-                 img_height, img_width, train_phase, step):
+                 img_height, img_width, train_phase, step, data_domain):
 
         self.sess = sess
         self.source_training_data = train_data[0]
@@ -30,6 +30,7 @@ class CycleGAN_Model(object):
         self.num_class = num_class
         self.train_phase = train_phase
         self.step = step
+        self.data_domain = data_domain
 
         if self.step == 1:
             self.build_cyclegan_model()
@@ -348,11 +349,19 @@ class CycleGAN_Model(object):
         self.cla_y = tf.placeholder(tf.int32, shape=[None, self.num_class], name='cla_y')
         self.is_training = tf.placeholder(tf.bool, name='is_training')
 
-        self.fake_x = self.Uet_G(inputMap=self.cla_x, scope_name='G', is_training=self.is_training,
+        if self.data_domain == 'Source':
+            self.reload_g_name = 'G'
+        elif self.data_domain == 'Target':
+            self.reload_g_name = 'F'
+        else:
+            print('Wrong Data Domain')
+            exit(3)
+
+        self.fake_x = self.Uet_G(inputMap=self.cla_x, scope_name=self.reload_g_name, is_training=self.is_training,
                                  reuse=False)
         tf.summary.image('Image/origin_x', self.cla_x)
         tf.summary.image('Image/fake_x', self.fake_x)
-        
+
         self.pred, self.pred_softmax = self.resnet_model(inputMap=self.fake_x,
                                                          model_name='classification_model',
                                                          ksize=3,
@@ -383,7 +392,7 @@ class CycleGAN_Model(object):
 
         with tf.variable_scope('optimization_variables'):
             self.cla_model_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='classification_model')
-            self.G_reload_var = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='G')
+            self.reload_var = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.reload_g_name)
 
         with tf.variable_scope('optimize'):
             with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope='classification_model')):
@@ -512,9 +521,9 @@ class CycleGAN_Model(object):
         print('Global Initialization Finish')
 
         # 生成器参数重载
-        reload_saver = tf.train.Saver(var_list=self.G_reload_var)
+        reload_saver = tf.train.Saver(var_list=self.reload_var)
         reload_saver.restore(self.sess, reload_path)
-        print('Generator F Reload Finish')
+        print('Generator %s Reload Finish' % self.reload_g_name)
 
         # 开始训练
         self.itr_epoch = len(self.source_training_data[0]) // self.bs

@@ -28,7 +28,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 if args.data_domain == 'Source':
     reload_path = '../checkpoint/cyclegan_s2t_step1/cyclegan_s2t_step1-88'
 elif args.data_domain == 'Target':
-    reload_path = '../checkpoint/cyclegan_t2s_step1/cyclegan_t2s_step1-183'
+    reload_path = '../checkpoint/cyclegan_s2t_step1/cyclegan_s2t_step1-88'
 else:
     reload_path = ''
 
@@ -52,7 +52,8 @@ with tf.Session(config=config) as sess:
                                img_height=args.img_height,
                                img_width=args.img_width,
                                train_phase=args.train_phase,
-                               step=args.step)
+                               step=args.step,
+                               data_domain=args.data_domain)
 
     if args.train_phase == 'Train':
         if args.step == 1:

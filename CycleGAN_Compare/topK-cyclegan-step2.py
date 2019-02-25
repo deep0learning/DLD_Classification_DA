@@ -66,8 +66,9 @@ def showResults(sorted_list, count):
         #         sorted_list[i][5], sorted_list[i][6], sorted_list[i][7], sorted_list[i][8]))
 
         print(
-            'Epoch [%d], Validation Accuracy [%.4f], Source Test Accuracy [%.4f], Source Test FScore [%.4f]' % (
-                sorted_list[i][0], sorted_list[i][1], sorted_list[i][2], sorted_list[i][3]))
+            'Epoch [%d], Source Test Accuracy [%.4f], Source F-value [%.4f], Target Test Accuracy [%.4f], '
+            'Target F-value [%.4f]' % (
+                sorted_list[i][0], sorted_list[i][-4], sorted_list[i][-3], sorted_list[i][-2], sorted_list[i][-1]))
     print()
 
 
